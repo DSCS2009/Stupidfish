@@ -1,3 +1,8 @@
+[https://lichess.org/@/StupidfishBOTBYDSCS](https://lichess.org/@/StupidfishBOTBYDSCS)
+
+A free and weak UCI chess engine specially designed to play blunder.
+
+## This is the original README:
 <div align="center">
 
   [![Stockfish][stockfish128-logo]][website-link]
