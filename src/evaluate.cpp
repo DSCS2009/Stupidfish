@@ -85,7 +85,7 @@ Value Eval::evaluate(const Eval::NNUE::Networks& networks, const Position& pos, 
     // Guarantee evaluation does not hit the tablebase range
     v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
 
-    return v;
+    return -v;
 }
 
 // Like evaluate(), but instead of returning a value, it returns
