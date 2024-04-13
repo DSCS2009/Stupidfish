@@ -43,12 +43,6 @@ jobs:
         run: |
           mkdir stupidfish
 
-      - name: Download wiki
-        run: |
-          git clone https://github.com/official-stupidfish/Stockfish.wiki.git wiki
-          rm -rf wiki/.git
-          mv wiki stupidfish/
-
       - name: Copy files
         run: |
           mv "${{ matrix.config.simple_name }} ${{ matrix.binaries }}" stupidfish-workflow
