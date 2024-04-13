@@ -65,7 +65,7 @@ jobs:
       - name: Create zip
         if: runner.os == 'Windows'
         run: |
-          zip -r stupidfish-$NAME-$BINARY.zip st
+          zip -r stupidfish-$NAME-$BINARY.zip stupidfish
 
       - name: Release
         if: startsWith(github.ref_name, 'sf_') && github.ref_type == 'tag'
