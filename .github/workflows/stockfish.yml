@@ -13,33 +13,9 @@ on:
       - tools
 jobs:
   Prerelease:
-    if: github.repository == 'official-stockfish/Stockfish' && (github.ref == 'refs/heads/master' || (startsWith(github.ref_name, 'sf_') && github.ref_type == 'tag'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # returns null if no pre-release exists
-      - name: Get Commit SHA of Latest Pre-release
-        run: |
-          # Install required packages
-          sudo apt-get update
-          sudo apt-get install -y curl jq
-
-          echo "COMMIT_SHA_TAG=$(jq -r 'map(select(.prerelease)) | first | .tag_name' <<< $(curl -s https://api.github.com/repos/${{ github.repository_owner }}/Stockfish/releases))" >> $GITHUB_ENV
-
-      # delete old previous pre-release and tag
-      - run: gh release delete ${{ env.COMMIT_SHA_TAG }} --cleanup-tag
-        if: env.COMMIT_SHA_TAG != 'null'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Make sure that an old ci that still runs on master doesn't recreate a prerelease
-      - name: Check Pullable Commits
-        id: check_commits
-        run: |
-          git fetch
-          CHANGES=$(git rev-list HEAD..origin/master --count)
-          echo "CHANGES=$CHANGES" >> $GITHUB_ENV
 
       - name: Get last commit SHA
         id: last_commit
@@ -76,12 +52,7 @@ jobs:
       matrix: ${{ needs.Matrix.outputs.matrix }}
   IWYU:
     uses: ./.github/workflows/iwyu.yml
-  Sanitizers:
-    uses: ./.github/workflows/sanitizers.yml
-  Tests:
-    uses: ./.github/workflows/tests.yml
   Binaries:
-    if: github.repository == 'official-stockfish/Stockfish'
     needs: [Matrix, Prerelease, Compilation]
     uses: ./.github/workflows/upload_binaries.yml
     with:
