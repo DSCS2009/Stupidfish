@@ -11,24 +11,6 @@
       "sde": "/home/runner/work/Stockfish/Stockfish/.output/sde-temp-files/sde-external-9.27.0-2023-09-13-lin/sde -future --"
     },
     {
-      "name": "MacOS 13 Apple Clang",
-      "os": "macos-13",
-      "simple_name": "macos",
-      "compiler": "clang++",
-      "comp": "clang",
-      "shell": "bash",
-      "archive_ext": "tar"
-    },
-    {
-      "name": "MacOS 14 Apple Clang M1",
-      "os": "macos-14",
-      "simple_name": "macos-m1",
-      "compiler": "clang++",
-      "comp": "clang",
-      "shell": "bash",
-      "archive_ext": "tar"
-    },
-    {
       "name": "Windows 2022 Mingw-w64 GCC x86_64",
       "os": "windows-2022",
       "simple_name": "windows",
@@ -50,8 +32,7 @@
     "x86-64-avxvnni",
     "x86-64-avx512",
     "x86-64-vnni256",
-    "x86-64-vnni512",
-    "apple-silicon"
+    "x86-64-vnni512"
   ],
   "exclude": [
     {
@@ -136,24 +117,6 @@
       "binaries": "x86-64-vnni512",
       "config": {
         "os": "macos-13"
-      }
-    },
-    {
-      "binaries": "apple-silicon",
-      "config": {
-        "os": "windows-2022"
-      }
-    },
-    {
-      "binaries": "apple-silicon",
-      "config": {
-        "os": "macos-13"
-      }
-    },
-    {
-      "binaries": "apple-silicon",
-      "config": {
-        "os": "ubuntu-20.04"
       }
     }
   ]

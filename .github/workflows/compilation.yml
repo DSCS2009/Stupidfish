@@ -65,10 +65,6 @@ jobs:
         if: runner.os != 'macOS'
         run: g++ -Q -march=native --help=target
 
-      - name: Show clang++ cpu info
-        if: runner.os == 'macOS'
-        run: clang++ -E - -march=native -###
-
       # x86-64 with newer extensions tests
 
       - name: Compile ${{ matrix.config.binaries }} build
