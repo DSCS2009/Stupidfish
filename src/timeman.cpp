@@ -47,7 +47,8 @@ void TimeManagement::advance_nodes_time(std::int64_t nodes) {
 void TimeManagement::init(Search::LimitsType& limits,
                           Color               us,
                           int                 ply,
-                          const OptionsMap&   options) {
+                          const OptionsMap&   options,
+                          double&             originalTimeAdjust) {
     TimePoint npmsec = TimePoint(options["nodestime"]);
 
     // If we have no time, we don't need to fully initialize TM.
@@ -104,8 +105,9 @@ void TimeManagement::init(Search::LimitsType& limits,
     // game time for the current move, so also cap to a percentage of available game time.
     if (limits.movestogo == 0)
     {
-        // Use extra time with larger increments
-        double optExtra = scaledInc < 500 ? 1.0 : 1.13;
+        // Extra time according to timeLeft
+        if (originalTimeAdjust < 0)
+            originalTimeAdjust = 0.3285 * std::log10(timeLeft) - 0.4830;
 
         // Calculate time constants based on current time left.
         double logTimeInSec = std::log10(scaledTime / 1000.0);
@@ -114,7 +116,8 @@ void TimeManagement::init(Search::LimitsType& limits,
 
         optScale = std::min(0.0122 + std::pow(ply + 2.95, 0.462) * optConstant,
                             0.213 * limits.time[us] / timeLeft)
-                 * optExtra;
+                 * originalTimeAdjust;
+
         maxScale = std::min(6.64, maxConstant + ply / 12.0);
     }
 

@@ -23,31 +23,35 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <thread>
-#include <vector>
 
 #include "misc.h"
+#include "syzygy/tbprobe.h"
+#include "thread.h"
 
 namespace Stockfish {
+
+// DEPTH_ENTRY_OFFSET exists because 1) we use `bool(depth8)` as the occupancy check, but
+// 2) we need to store negative depths for QS. (`depth8` is the only field with "spare bits":
+// we sacrifice the ability to store depths greater than 1<<8 less the offset, as asserted below.)
 
 // Populates the TTEntry with a new node's data, possibly
 // overwriting an old position. The update is not atomic and can be racy.
 void TTEntry::save(
   Key k, Value v, bool pv, Bound b, Depth d, Move m, Value ev, uint8_t generation8) {
 
-    // Preserve any existing move for the same position
+    // Preserve the old ttmove if we don't have a new one
     if (m || uint16_t(k) != key16)
         move16 = m;
 
     // Overwrite less valuable entries (cheapest checks first)
-    if (b == BOUND_EXACT || uint16_t(k) != key16 || d - DEPTH_OFFSET + 2 * pv > depth8 - 4
+    if (b == BOUND_EXACT || uint16_t(k) != key16 || d - DEPTH_ENTRY_OFFSET + 2 * pv > depth8 - 4
         || relative_age(generation8))
     {
-        assert(d > DEPTH_OFFSET);
-        assert(d < 256 + DEPTH_OFFSET);
+        assert(d > DEPTH_ENTRY_OFFSET);
+        assert(d < 256 + DEPTH_ENTRY_OFFSET);
 
         key16     = uint16_t(k);
-        depth8    = uint8_t(d - DEPTH_OFFSET);
+        depth8    = uint8_t(d - DEPTH_ENTRY_OFFSET);
         genBound8 = uint8_t(generation8 | uint8_t(pv) << 2 | b);
         value16   = int16_t(v);
         eval16    = int16_t(ev);
@@ -70,7 +74,7 @@ uint8_t TTEntry::relative_age(const uint8_t generation8) const {
 // Sets the size of the transposition table,
 // measured in megabytes. Transposition table consists
 // of clusters and each cluster consists of ClusterSize number of TTEntry.
-void TranspositionTable::resize(size_t mbSize, int threadCount) {
+void TranspositionTable::resize(size_t mbSize, ThreadPool& threads) {
     aligned_large_pages_free(table);
 
     clusterCount = mbSize * 1024 * 1024 / sizeof(Cluster);
@@ -82,32 +86,29 @@ void TranspositionTable::resize(size_t mbSize, int threadCount) {
         exit(EXIT_FAILURE);
     }
 
-    clear(threadCount);
+    clear(threads);
 }
 
 
 // Initializes the entire transposition table to zero,
 // in a multi-threaded way.
-void TranspositionTable::clear(size_t threadCount) {
-    std::vector<std::thread> threads;
+void TranspositionTable::clear(ThreadPool& threads) {
+    const size_t threadCount = threads.num_threads();
 
-    for (size_t idx = 0; idx < size_t(threadCount); ++idx)
+    for (size_t i = 0; i < threadCount; ++i)
     {
-        threads.emplace_back([this, idx, threadCount]() {
-            // Thread binding gives faster search on systems with a first-touch policy
-            if (threadCount > 8)
-                WinProcGroup::bind_this_thread(idx);
-
+        threads.run_on_thread(i, [this, i, threadCount]() {
             // Each thread will zero its part of the hash table
-            const size_t stride = size_t(clusterCount / threadCount), start = size_t(stride * idx),
-                         len = idx != size_t(threadCount) - 1 ? stride : clusterCount - start;
+            const size_t stride = clusterCount / threadCount;
+            const size_t start  = stride * i;
+            const size_t len    = i + 1 != threadCount ? stride : clusterCount - start;
 
             std::memset(&table[start], 0, len * sizeof(Cluster));
         });
     }
 
-    for (std::thread& th : threads)
-        th.join();
+    for (size_t i = 0; i < threadCount; ++i)
+        threads.wait_on_thread(i);
 }
 
 
@@ -123,7 +124,7 @@ TTEntry* TranspositionTable::probe(const Key key, bool& found) const {
     const uint16_t key16 = uint16_t(key);  // Use the low 16 bits as key inside the cluster
 
     for (int i = 0; i < ClusterSize; ++i)
-        if (tte[i].key16 == key16 || !tte[i].depth8)
+        if (tte[i].key16 == key16)
             return found = bool(tte[i].depth8), &tte[i];
 
     // Find an entry to be replaced according to the replacement strategy

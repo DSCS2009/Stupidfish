@@ -37,12 +37,15 @@ namespace Stockfish {
 // move       16 bit
 // value      16 bit
 // eval value 16 bit
+//
+// These fields are in the same order as accessed by TT::probe(), since memory is fastest sequentially.
+// Equally, the store order in save() matches this order.
 struct TTEntry {
 
     Move  move() const { return Move(move16); }
     Value value() const { return Value(value16); }
     Value eval() const { return Value(eval16); }
-    Depth depth() const { return Depth(depth8 + DEPTH_OFFSET); }
+    Depth depth() const { return Depth(depth8 + DEPTH_ENTRY_OFFSET); }
     bool  is_pv() const { return bool(genBound8 & 0x4); }
     Bound bound() const { return Bound(genBound8 & 0x3); }
     void  save(Key k, Value v, bool pv, Bound b, Depth d, Move m, Value ev, uint8_t generation8);
@@ -60,6 +63,7 @@ struct TTEntry {
     int16_t  eval16;
 };
 
+class ThreadPool;
 
 // A TranspositionTable is an array of Cluster, of size clusterCount. Each
 // cluster consists of ClusterSize number of TTEntry. Each non-empty TTEntry
@@ -99,8 +103,8 @@ class TranspositionTable {
 
     TTEntry* probe(const Key key, bool& found) const;
     int      hashfull() const;
-    void     resize(size_t mbSize, int threadCount);
-    void     clear(size_t threadCount);
+    void     resize(size_t mbSize, ThreadPool& threads);
+    void     clear(ThreadPool& threads);
 
     TTEntry* first_entry(const Key key) const {
         return &table[mul_hi64(key, clusterCount)].entry[0];
