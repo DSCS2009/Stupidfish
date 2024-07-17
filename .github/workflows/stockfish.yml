@@ -14,6 +14,8 @@ on:
 jobs:
   Prerelease:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # For deleting/creating a prerelease
     steps:
       - uses: actions/checkout@v4
       - name: Get last commit SHA
@@ -40,6 +42,8 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: set-matrix
         run: |
           TASKS=$(echo $(cat .github/ci/matrix.json) )
@@ -51,8 +55,18 @@ jobs:
       matrix: ${{ needs.Matrix.outputs.matrix }}
   IWYU:
     uses: ./.github/workflows/iwyu.yml
+  Sanitizers:
+    uses: ./.github/workflows/sanitizers.yml
+  Tests:
+    uses: ./.github/workflows/tests.yml
   Binaries:
     needs: [Matrix, Prerelease, Compilation]
     uses: ./.github/workflows/upload_binaries.yml
     with:
       matrix: ${{ needs.Matrix.outputs.matrix }}
+  ARM_Binaries:
+    if: github.repository == 'official-stockfish/Stockfish'
+    needs: [Matrix, Prerelease, ARMCompilation]
+    uses: ./.github/workflows/upload_binaries.yml
+    with:
+      matrix: ${{ needs.Matrix.outputs.arm_matrix }}

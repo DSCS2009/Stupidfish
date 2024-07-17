@@ -26,10 +26,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <iosfwd>
-#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 #define stringify2(x) #x
 #define stringify(x) stringify2(x)
@@ -44,38 +43,9 @@ std::string compiler_info();
 // which can be quite slow.
 void prefetch(const void* addr);
 
-void  start_logger(const std::string& fname);
-void* std_aligned_alloc(size_t alignment, size_t size);
-void  std_aligned_free(void* ptr);
-// memory aligned by page size, min alignment: 4096 bytes
-void* aligned_large_pages_alloc(size_t size);
-// nop if mem == nullptr
-void aligned_large_pages_free(void* mem);
+void start_logger(const std::string& fname);
 
 size_t str_to_size_t(const std::string& s);
-
-// Deleter for automating release of memory area
-template<typename T>
-struct AlignedDeleter {
-    void operator()(T* ptr) const {
-        ptr->~T();
-        std_aligned_free(ptr);
-    }
-};
-
-template<typename T>
-struct LargePageDeleter {
-    void operator()(T* ptr) const {
-        ptr->~T();
-        aligned_large_pages_free(ptr);
-    }
-};
-
-template<typename T>
-using AlignedPtr = std::unique_ptr<T, AlignedDeleter<T>>;
-
-template<typename T>
-using LargePagePtr = std::unique_ptr<T, LargePageDeleter<T>>;
 
 #if defined(__linux__)
 
@@ -97,6 +67,7 @@ std::optional<std::string> read_file_to_string(const std::string& path);
 void dbg_hit_on(bool cond, int slot = 0);
 void dbg_mean_of(int64_t value, int slot = 0);
 void dbg_stdev_of(int64_t value, int slot = 0);
+void dbg_extremes_of(int64_t value, int slot = 0);
 void dbg_correl_of(int64_t value1, int64_t value2, int slot = 0);
 void dbg_print();
 
@@ -131,6 +102,7 @@ inline std::vector<std::string> split(const std::string& s, const std::string& d
 }
 
 void remove_whitespace(std::string& s);
+bool is_whitespace(const std::string& s);
 
 enum SyncCout {
     IO_LOCK,
@@ -141,19 +113,8 @@ std::ostream& operator<<(std::ostream&, SyncCout);
 #define sync_cout std::cout << IO_LOCK
 #define sync_endl std::endl << IO_UNLOCK
 
-
-// Get the first aligned element of an array.
-// ptr must point to an array of size at least `sizeof(T) * N + alignment` bytes,
-// where N is the number of elements in the array.
-template<uintptr_t Alignment, typename T>
-T* align_ptr_up(T* ptr) {
-    static_assert(alignof(T) < Alignment);
-
-    const uintptr_t ptrint = reinterpret_cast<uintptr_t>(reinterpret_cast<char*>(ptr));
-    return reinterpret_cast<T*>(
-      reinterpret_cast<char*>((ptrint + (Alignment - 1)) / Alignment * Alignment));
-}
-
+void sync_cout_start();
+void sync_cout_end();
 
 // True if and only if the binary is compiled on a little-endian machine
 static inline const union {

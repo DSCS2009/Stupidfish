@@ -5,6 +5,9 @@ on:
       matrix:
         type: string
         required: true
+    secrets:
+      token:
+        required: true
 
 jobs:
   Artifacts:
@@ -25,6 +28,8 @@ jobs:
         shell: ${{ matrix.config.shell }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Download artifact from compilation
         uses: actions/download-artifact@v4
@@ -97,4 +102,4 @@ jobs:
           name: Stupidfish dev-${{ env.COMMIT_DATE }}-${{ env.COMMIT_SHA }}
           tag_name: stupidfish-dev-${{ env.COMMIT_DATE }}-${{ env.COMMIT_SHA }}
           prerelease: true
-          files: stupidfish-${{ matrix.config.simple_name }}-${{ matrix.binaries }}.${{ matrix.config.archive_ext }}
+          files: stockfish-${{ matrix.config.simple_name }}-${{ matrix.binaries }}.${{ matrix.config.archive_ext }}

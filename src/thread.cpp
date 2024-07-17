@@ -50,8 +50,8 @@ Thread::Thread(Search::SharedState&                    sharedState,
 
     run_custom_job([this, &binder, &sharedState, &sm, n]() {
         // Use the binder to [maybe] bind the threads to a NUMA node before doing
-        // the Worker allocation.
-        // Ideally we would also allocate the SearchManager here, but that's minor.
+        // the Worker allocation. Ideally we would also allocate the SearchManager
+        // here, but that's minor.
         this->numaAccessToken = binder();
         this->worker =
           std::make_unique<Search::Worker>(sharedState, std::move(sm), n, this->numaAccessToken);
@@ -72,27 +72,26 @@ Thread::~Thread() {
     stdThread.join();
 }
 
-
 // Wakes up the thread that will start the search
 void Thread::start_searching() {
     assert(worker != nullptr);
     run_custom_job([this]() { worker->start_searching(); });
 }
 
-// Wakes up the thread that will start the search
+// Clears the histories for the thread worker (usually before a new game)
 void Thread::clear_worker() {
     assert(worker != nullptr);
     run_custom_job([this]() { worker->clear(); });
 }
 
-// Blocks on the condition variable
-// until the thread has finished searching.
+// Blocks on the condition variable until the thread has finished searching
 void Thread::wait_for_search_finished() {
 
     std::unique_lock<std::mutex> lk(mutex);
     cv.wait(lk, [&] { return !searching; });
 }
 
+// Launching a function in the thread
 void Thread::run_custom_job(std::function<void()> f) {
     {
         std::unique_lock<std::mutex> lk(mutex);
@@ -103,8 +102,8 @@ void Thread::run_custom_job(std::function<void()> f) {
     cv.notify_one();
 }
 
-// Thread gets parked here, blocked on the
-// condition variable, when it has no work to do.
+// Thread gets parked here, blocked on the condition variable
+// when the thread has no work to do.
 
 void Thread::idle_loop() {
     while (true)
@@ -127,9 +126,7 @@ void Thread::idle_loop() {
     }
 }
 
-Search::SearchManager* ThreadPool::main_manager() {
-    return static_cast<Search::SearchManager*>(main_thread()->worker.get()->manager.get());
-}
+Search::SearchManager* ThreadPool::main_manager() { return main_thread()->worker->main_manager(); }
 
 uint64_t ThreadPool::nodes_searched() const { return accumulate(&Search::Worker::nodes); }
 uint64_t ThreadPool::tb_hits() const { return accumulate(&Search::Worker::tbHits); }
@@ -181,7 +178,7 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
             const size_t    threadId = threads.size();
             const NumaIndex numaId   = doBindThreads ? boundThreadToNumaNode[threadId] : 0;
             auto            manager  = threadId == 0 ? std::unique_ptr<Search::ISearchManager>(
-                             std::make_unique<Search::SearchManager>(updateContext))
+                                             std::make_unique<Search::SearchManager>(updateContext))
                                                      : std::make_unique<Search::NullSearchManager>();
 
             // When not binding threads we want to force all access to happen
@@ -235,8 +232,9 @@ void ThreadPool::wait_on_thread(size_t threadId) {
 
 size_t ThreadPool::num_threads() const { return threads.size(); }
 
-// Wakes up main thread waiting in idle_loop() and
-// returns immediately. Main thread will wake up other threads and start the search.
+
+// Wakes up main thread waiting in idle_loop() and returns immediately.
+// Main thread will wake up other threads and start the search.
 void ThreadPool::start_thinking(const OptionsMap&  options,
                                 Position&          pos,
                                 StateListPtr&      states,
@@ -276,8 +274,8 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     // We use Position::set() to set root position across threads. But there are
     // some StateInfo fields (previous, pliesFromNull, capturedPiece) that cannot
     // be deduced from a fen string, so set() clears them and they are set from
-    // setupStates->back() later. The rootState is per thread, earlier states are shared
-    // since they are read-only.
+    // setupStates->back() later. The rootState is per thread, earlier states are
+    // shared since they are read-only.
     for (auto&& th : threads)
     {
         th->run_custom_job([&]() {
@@ -337,7 +335,7 @@ Thread* ThreadPool::get_best_thread() const {
         const bool newThreadInProvenLoss =
           newThreadScore != -VALUE_INFINITE && newThreadScore <= VALUE_TB_LOSS_IN_MAX_PLY;
 
-        // Note that we make sure not to pick a thread with truncated-PV for better viewer experience.
+        // We make sure not to pick a thread with truncated principal variation
         const bool betterVotingValue =
           thread_voting_value(th.get()) * int(newThreadPV.size() > 2)
           > thread_voting_value(bestThread) * int(bestThreadPV.size() > 2);
@@ -365,8 +363,8 @@ Thread* ThreadPool::get_best_thread() const {
 }
 
 
-// Start non-main threads
-// Will be invoked by main thread after it has started searching
+// Start non-main threads.
+// Will be invoked by main thread after it has started searching.
 void ThreadPool::start_searching() {
 
     for (auto&& th : threads)
@@ -376,7 +374,6 @@ void ThreadPool::start_searching() {
 
 
 // Wait for non-main threads
-
 void ThreadPool::wait_for_search_finished() const {
 
     for (auto&& th : threads)

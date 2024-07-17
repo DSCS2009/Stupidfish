@@ -18,29 +18,6 @@
 
 #include "misc.h"
 
-#ifdef _WIN32
-    #if _WIN32_WINNT < 0x0601
-        #undef _WIN32_WINNT
-        #define _WIN32_WINNT 0x0601  // Force to include needed API prototypes
-    #endif
-
-    #ifndef NOMINMAX
-        #define NOMINMAX
-    #endif
-
-    #include <windows.h>
-// The needed Windows API for processor groups could be missed from old Windows
-// versions, so instead of calling them directly (forcing the linker to resolve
-// the calls at compile time), try to load them at runtime. To do this we need
-// first to define the corresponding function pointers.
-extern "C" {
-using OpenProcessToken_t      = bool (*)(HANDLE, DWORD, PHANDLE);
-using LookupPrivilegeValueA_t = bool (*)(LPCSTR, LPCSTR, PLUID);
-using AdjustTokenPrivileges_t =
-  bool (*)(HANDLE, BOOL, PTOKEN_PRIVILEGES, DWORD, PTOKEN_PRIVILEGES, PDWORD);
-}
-#endif
-
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -48,24 +25,13 @@ using AdjustTokenPrivileges_t =
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string_view>
 
 #include "types.h"
-
-#if defined(__linux__) && !defined(__ANDROID__)
-    #include <sys/mman.h>
-#endif
-
-#if defined(__APPLE__) || defined(__ANDROID__) || defined(__OpenBSD__) \
-  || (defined(__GLIBCXX__) && !defined(_GLIBCXX_HAVE_ALIGNED_ALLOC) && !defined(_WIN32)) \
-  || defined(__e2k__)
-    #define POSIXALIGNEDALLOC
-    #include <stdlib.h>
-#endif
 
 namespace Stockfish {
 
@@ -146,14 +112,16 @@ class Logger {
 
 
 // Returns the full name of the current Stockfish version.
-// For local dev compiles we try to append the commit sha and commit date
-// from git if that fails only the local compilation date is set and "nogit" is specified:
-// Stockfish dev-YYYYMMDD-SHA
-// or
-// Stockfish dev-YYYYMMDD-nogit
+//
+// For local dev compiles we try to append the commit SHA and
+// commit date from git. If that fails only the local compilation
+// date is set and "nogit" is specified:
+//      Stockfish dev-YYYYMMDD-SHA
+//      or
+//      Stockfish dev-YYYYMMDD-nogit
 //
 // For releases (non-dev builds) we only include the version number:
-// Stockfish version
+//      Stockfish version
 std::string engine_info(bool to_uci) {
     std::stringstream ss;
     ss << "Stockfish " << version << std::setfill('0');
@@ -165,8 +133,9 @@ std::string engine_info(bool to_uci) {
         ss << stringify(GIT_DATE);
 #else
         constexpr std::string_view months("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec");
-        std::string                month, day, year;
-        std::stringstream          date(__DATE__);  // From compiler, format is "Sep 21 2008"
+
+        std::string       month, day, year;
+        std::stringstream date(__DATE__);  // From compiler, format is "Sep 21 2008"
 
         date >> month >> day >> year;
         ss << year << std::setw(2) << std::setfill('0') << (1 + months.find(month) / 4)
@@ -315,13 +284,21 @@ template<size_t N>
 struct DebugInfo {
     std::atomic<int64_t> data[N] = {0};
 
-    constexpr inline std::atomic<int64_t>& operator[](int index) { return data[index]; }
+    constexpr std::atomic<int64_t>& operator[](int index) { return data[index]; }
 };
 
-DebugInfo<2> hit[MaxDebugSlots];
-DebugInfo<2> mean[MaxDebugSlots];
-DebugInfo<3> stdev[MaxDebugSlots];
-DebugInfo<6> correl[MaxDebugSlots];
+struct DebugExtremes: public DebugInfo<3> {
+    DebugExtremes() {
+        data[1] = std::numeric_limits<int64_t>::min();
+        data[2] = std::numeric_limits<int64_t>::max();
+    }
+};
+
+DebugInfo<2>  hit[MaxDebugSlots];
+DebugInfo<2>  mean[MaxDebugSlots];
+DebugInfo<3>  stdev[MaxDebugSlots];
+DebugInfo<6>  correl[MaxDebugSlots];
+DebugExtremes extremes[MaxDebugSlots];
 
 }  // namespace
 
@@ -343,6 +320,18 @@ void dbg_stdev_of(int64_t value, int slot) {
     ++stdev[slot][0];
     stdev[slot][1] += value;
     stdev[slot][2] += value * value;
+}
+
+void dbg_extremes_of(int64_t value, int slot) {
+    ++extremes[slot][0];
+
+    int64_t current_max = extremes[slot][1].load();
+    while (current_max < value && !extremes[slot][1].compare_exchange_weak(current_max, value))
+    {}
+
+    int64_t current_min = extremes[slot][2].load();
+    while (current_min > value && !extremes[slot][2].compare_exchange_weak(current_min, value))
+    {}
 }
 
 void dbg_correl_of(int64_t value1, int64_t value2, int slot) {
@@ -380,6 +369,13 @@ void dbg_print() {
         }
 
     for (int i = 0; i < MaxDebugSlots; ++i)
+        if ((n = extremes[i][0]))
+        {
+            std::cerr << "Extremity #" << i << ": Total " << n << " Min " << extremes[i][2]
+                      << " Max " << extremes[i][1] << std::endl;
+        }
+
+    for (int i = 0; i < MaxDebugSlots; ++i)
         if ((n = correl[i][0]))
         {
             double r = (E(correl[i][5]) - E(correl[i][1]) * E(correl[i][3]))
@@ -405,6 +401,8 @@ std::ostream& operator<<(std::ostream& os, SyncCout sc) {
     return os;
 }
 
+void sync_cout_start() { std::cout << IO_LOCK; }
+void sync_cout_end() { std::cout << IO_UNLOCK; }
 
 // Trampoline helper to avoid moving Logger to misc.h
 void start_logger(const std::string& fname) { Logger::start(fname); }
@@ -426,169 +424,6 @@ void prefetch(const void* addr) {
 }
 
 #endif
-
-
-// Wrapper for systems where the c++17 implementation
-// does not guarantee the availability of aligned_alloc(). Memory allocated with
-// std_aligned_alloc() must be freed with std_aligned_free().
-void* std_aligned_alloc(size_t alignment, size_t size) {
-
-#if defined(POSIXALIGNEDALLOC)
-    void* mem;
-    return posix_memalign(&mem, alignment, size) ? nullptr : mem;
-#elif defined(_WIN32) && !defined(_M_ARM) && !defined(_M_ARM64)
-    return _mm_malloc(size, alignment);
-#elif defined(_WIN32)
-    return _aligned_malloc(size, alignment);
-#else
-    return std::aligned_alloc(alignment, size);
-#endif
-}
-
-void std_aligned_free(void* ptr) {
-
-#if defined(POSIXALIGNEDALLOC)
-    free(ptr);
-#elif defined(_WIN32) && !defined(_M_ARM) && !defined(_M_ARM64)
-    _mm_free(ptr);
-#elif defined(_WIN32)
-    _aligned_free(ptr);
-#else
-    free(ptr);
-#endif
-}
-
-// aligned_large_pages_alloc() will return suitably aligned memory, if possible using large pages.
-
-#if defined(_WIN32)
-
-static void* aligned_large_pages_alloc_windows([[maybe_unused]] size_t allocSize) {
-
-    #if !defined(_WIN64)
-    return nullptr;
-    #else
-
-    HANDLE hProcessToken{};
-    LUID   luid{};
-    void*  mem = nullptr;
-
-    const size_t largePageSize = GetLargePageMinimum();
-    if (!largePageSize)
-        return nullptr;
-
-    // Dynamically link OpenProcessToken, LookupPrivilegeValue and AdjustTokenPrivileges
-
-    HMODULE hAdvapi32 = GetModuleHandle(TEXT("advapi32.dll"));
-
-    if (!hAdvapi32)
-        hAdvapi32 = LoadLibrary(TEXT("advapi32.dll"));
-
-    auto OpenProcessToken_f =
-      OpenProcessToken_t((void (*)()) GetProcAddress(hAdvapi32, "OpenProcessToken"));
-    if (!OpenProcessToken_f)
-        return nullptr;
-    auto LookupPrivilegeValueA_f =
-      LookupPrivilegeValueA_t((void (*)()) GetProcAddress(hAdvapi32, "LookupPrivilegeValueA"));
-    if (!LookupPrivilegeValueA_f)
-        return nullptr;
-    auto AdjustTokenPrivileges_f =
-      AdjustTokenPrivileges_t((void (*)()) GetProcAddress(hAdvapi32, "AdjustTokenPrivileges"));
-    if (!AdjustTokenPrivileges_f)
-        return nullptr;
-
-    // We need SeLockMemoryPrivilege, so try to enable it for the process
-    if (!OpenProcessToken_f(  // OpenProcessToken()
-          GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hProcessToken))
-        return nullptr;
-
-    if (LookupPrivilegeValueA_f(nullptr, "SeLockMemoryPrivilege", &luid))
-    {
-        TOKEN_PRIVILEGES tp{};
-        TOKEN_PRIVILEGES prevTp{};
-        DWORD            prevTpLen = 0;
-
-        tp.PrivilegeCount           = 1;
-        tp.Privileges[0].Luid       = luid;
-        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-        // Try to enable SeLockMemoryPrivilege. Note that even if AdjustTokenPrivileges() succeeds,
-        // we still need to query GetLastError() to ensure that the privileges were actually obtained.
-        if (AdjustTokenPrivileges_f(hProcessToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), &prevTp,
-                                    &prevTpLen)
-            && GetLastError() == ERROR_SUCCESS)
-        {
-            // Round up size to full pages and allocate
-            allocSize = (allocSize + largePageSize - 1) & ~size_t(largePageSize - 1);
-            mem       = VirtualAlloc(nullptr, allocSize, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES,
-                                     PAGE_READWRITE);
-
-            // Privilege no longer needed, restore previous state
-            AdjustTokenPrivileges_f(hProcessToken, FALSE, &prevTp, 0, nullptr, nullptr);
-        }
-    }
-
-    CloseHandle(hProcessToken);
-
-    return mem;
-
-    #endif
-}
-
-void* aligned_large_pages_alloc(size_t allocSize) {
-
-    // Try to allocate large pages
-    void* mem = aligned_large_pages_alloc_windows(allocSize);
-
-    // Fall back to regular, page-aligned, allocation if necessary
-    if (!mem)
-        mem = VirtualAlloc(nullptr, allocSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-
-    return mem;
-}
-
-#else
-
-void* aligned_large_pages_alloc(size_t allocSize) {
-
-    #if defined(__linux__)
-    constexpr size_t alignment = 2 * 1024 * 1024;  // assumed 2MB page size
-    #else
-    constexpr size_t alignment = 4096;  // assumed small page size
-    #endif
-
-    // Round up to multiples of alignment
-    size_t size = ((allocSize + alignment - 1) / alignment) * alignment;
-    void*  mem  = std_aligned_alloc(alignment, size);
-    #if defined(MADV_HUGEPAGE)
-    madvise(mem, size, MADV_HUGEPAGE);
-    #endif
-    return mem;
-}
-
-#endif
-
-
-// aligned_large_pages_free() will free the previously allocated ttmem
-
-#if defined(_WIN32)
-
-void aligned_large_pages_free(void* mem) {
-
-    if (mem && !VirtualFree(mem, 0, MEM_RELEASE))
-    {
-        DWORD err = GetLastError();
-        std::cerr << "Failed to free large page memory. Error code: 0x" << std::hex << err
-                  << std::dec << std::endl;
-        exit(EXIT_FAILURE);
-    }
-}
-
-#else
-
-void aligned_large_pages_free(void* mem) { std_aligned_free(mem); }
-
-#endif
-
 
 #ifdef _WIN32
     #include <direct.h>
@@ -614,6 +449,10 @@ std::optional<std::string> read_file_to_string(const std::string& path) {
 
 void remove_whitespace(std::string& s) {
     s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return std::isspace(c); }), s.end());
+}
+
+bool is_whitespace(const std::string& s) {
+    return std::all_of(s.begin(), s.end(), [](char c) { return std::isspace(c); });
 }
 
 std::string CommandLine::get_binary_directory(std::string argv0) {
